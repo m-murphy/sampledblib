@@ -144,7 +144,7 @@ class BaseFileManager:
                         )
                     except ValueError:
                         raise DateParseError(
-                            message="Date must be in format 'DD/MM/YYYY'"
+                            message=f"Date must be in format {self.date_format}"
                         )
                 else:
                     specimen_entry["collection_date"] = None
