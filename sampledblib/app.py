@@ -81,7 +81,7 @@ class SampleDB(object):
         is_longitudinal,
         lead_person,
         description=None,
-        **kwargs
+        **kwargs,
     ):
         # type: (str, str, bool, str, str) -> Study
         """
@@ -171,11 +171,11 @@ class SampleDB(object):
             )
         return old_study, study_subjects, specimens, matrix_tubes
 
-    def update_study(self, id, d):
+    def update_study(self, study_id, d):
         # type: (int, dict) -> tuple[Study, list[StudySubject], list[Specimen], list[MatrixTube]]
         with self._session_scope() as session:
             with session.no_autoflush:
-                study = session.query(Study).get(id)
+                study = session.query(Study).get(study_id)
                 study.update(d)
             study_subjects = (
                 session.query(StudySubject)
@@ -201,6 +201,16 @@ class SampleDB(object):
         # type: (Study) -> boolean
         with self._session_scope() as session:
             s = session.query(Study).get(study.id)
+            if s.subjects:
+                raise ValueError("Cannot delete a study with subjects.")
+            session.delete(s)
+        return True
+
+    def delete_study_by_id(self, study_id):
+        with self._session_scope() as session:
+            s = session.query(Study).get(study_id)
+            if s.subjects:
+                raise ValueError("Cannot delete a study with subjects.")
             session.delete(s)
         return True
 
@@ -236,7 +246,7 @@ class SampleDB(object):
         Add a new study_subject to a study.
         :param uid: unique identifier for study_subject in study.
         :param study_id: Study ID
-        :return: Individual
+        :return: StudySubject
         """
         with self._session_scope() as session:
             study_subject = self._add_study_subject(session, study_id, uid)
@@ -255,7 +265,7 @@ class SampleDB(object):
         Add a collection of study_subjects to a study.
         :param uids: list of unique individual identifiers in a study.
         :param study_id: Study ID
-        :return: Individual[]
+        :return: StudySubject[]
         """
         with self._session_scope() as session:
             study = session.query(Study).get(study_id)
@@ -321,6 +331,10 @@ class SampleDB(object):
         # type: (int) -> Boolean
         with self._session_scope() as session:
             location = session.query(Location).get(id)
+            if location.specimen_containers:
+                raise ValueError(
+                    "Cannot delete a location with specimen containers associated."
+                )
             session.delete(location)
         return True
 
@@ -362,6 +376,14 @@ class SampleDB(object):
     def delete_specimen_type(self, id):
         # type: (int) -> Boolean
         with self._session_scope() as session:
+            any_refs = (
+                session.query(Specimen).filter(Specimen.specimen_type_id == id).first()
+                is not None
+            )
+            if any_refs:
+                raise ValueError(
+                    "Cannot delete a specimen type with associated specimens."
+                )
             specimen_type = session.query(SpecimenType).get(id)
             session.delete(specimen_type)
         return True
@@ -500,7 +522,6 @@ class SampleDB(object):
             }
         :param create_missing_specimens: If specimen for subject missing in study, create if true
         :param create_missing_subjects: If subjects missing in study, create if true
-        :return: List of added MatrixTubes.
         """
         matrix_tubes = []
         study_subjects = []
@@ -512,6 +533,10 @@ class SampleDB(object):
                     .filter(MatrixPlate.uid == plate_uid)
                     .one()
                 )
+                if matrix_plate.location_id != location_id:
+                    raise ValueError(
+                        f"Plate already exists at location: {matrix_plate.location.label}"
+                    )
             except NoResultFound:
                 matrix_plate = MatrixPlate(uid=plate_uid, location_id=location_id)
                 session.add(matrix_plate)
@@ -545,15 +570,11 @@ class SampleDB(object):
                                 )
                             else:
                                 raise ValueError(
-                                    "Sample {} in Study {} does not exist.".format(
-                                        uid, short_code
-                                    )
+                                    f"Sample {uid} in Study {short_code} does not exist."
                                 )
                     else:
                         raise ValueError(
-                            "{} Specimen for Sample {} does not exist in Study {}".format(
-                                specimen_type, uid, short_code
-                            )
+                            f"{specimen_type} Specimen for Sample {uid} does not exist in Study {short_code}"
                         )
                 session.flush()
 
@@ -661,6 +682,8 @@ class SampleDB(object):
     def delete_plate(self, plate_id):
         with self._session_scope() as session:
             matrix_plate = session.query(MatrixPlate).get(plate_id)
+            if matrix_plate.tubes:
+                raise ValueError("Cannot delete plate containing tubes.")
             session.delete(matrix_plate)
         return True
 
@@ -808,10 +831,12 @@ class SampleDB(object):
         :return: The corresponding MatrixTube that has been set to exhausted.
         """
         with self._session_scope() as session:
+            matrix_tubes = []
             for matrix_tube_barcode in matrix_tube_barcodes:
                 matrix_tube = self._get_matrix_tube(session, matrix_tube_barcode)
                 matrix_tube.exhausted = True
-        return matrix_tube
+                matrix_tubes.append(matrix_tube)
+        return matrix_tubes
 
     def unset_matrix_tubes_exhausted(self, matrix_tube_barcodes):
         """
@@ -820,12 +845,17 @@ class SampleDB(object):
         :return: The corresponding MatrixTube that has been unset as exhausted.
         """
         with self._session_scope() as session:
+            matrix_tubes = []
             for matrix_tube_barcode in matrix_tube_barcodes:
                 matrix_tube = self._get_matrix_tube(session, matrix_tube_barcode)
                 matrix_tube.exhausted = False
-        return matrix_tube
+                matrix_tubes.append(matrix_tube)
+        return matrix_tubes
 
     def convert_barcoded_entries(self, barcoded_entries, date_format="%d/%m/%Y"):
+        """
+        Converts barcoded entries into dictionary objects, ready to get json serialized.
+        """
         results = []
         with self._session_scope() as session:
             for entry in barcoded_entries:
@@ -864,17 +894,17 @@ class SampleDB(object):
         return matrix_tube_ids, specimen_ids
 
     def delete_matrix_tubes(self, matrix_tubes):
+        """
+        Deletes the provided set of matrix tubes, and associated specimens with no remaining containers
+        """
         with self._session_scope() as session:
             matrix_tube_ids = list(set([_.id for _ in matrix_tubes]))
             specimens = []
             for matrix_tube in matrix_tubes:
                 specimen = matrix_tube.specimen
-                specimen_matrix_tube_ids = [
-                    _.id
-                    for _ in specimen.storage_containers
-                    if _.discriminator == "matrix_tube"
-                ]
-                if set(specimen_matrix_tube_ids).issubset(matrix_tube_ids):
+                specimen_container_ids = [_.id for _ in specimen.storage_containers]
+                # check if the specimen has had all containers removed
+                if set(specimen_container_ids).issubset(matrix_tube_ids):
                     specimens.append(specimen)
             specimen_ids = list(set([_.id for _ in specimens]))
             with session.no_autoflush:

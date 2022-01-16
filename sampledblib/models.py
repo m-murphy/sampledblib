@@ -124,7 +124,7 @@ class StudySubject(Base):
         UniqueConstraint("uid", "study_id", name="study_subject_study_uc"),
     )
     uid = Column(String, index=True, nullable=False)
-    study_id = Column(Integer, ForeignKey("study.id"))
+    study_id = Column(Integer, ForeignKey("study.id"), nullable=False)
     study = relationship("Study", backref="subjects")
     read_only_fields = Base.read_only_fields | {"study", "specimens"}
 
@@ -166,7 +166,7 @@ class Specimen(Base):
         Integer, ForeignKey("study_subject.id"), index=True, nullable=False
     )
     study_subject = relationship("StudySubject", backref="specimens")
-    specimen_type_id = Column(Integer, ForeignKey("specimen_type.id"))
+    specimen_type_id = Column(Integer, ForeignKey("specimen_type.id"), nullable=False)
     specimen_type = relationship("SpecimenType")
     collection_date = Column(Date, default=None)
 
@@ -287,7 +287,9 @@ class MatrixTube(StorageContainer):
     __mapper_args__ = {"polymorphic_identity": "matrix_tube"}
 
     id = Column(Integer, ForeignKey("storage_container.id"), primary_key=True)
-    plate_id = Column(Integer, ForeignKey("matrix_plate.id"), index=True, nullable=True)
+    plate_id = Column(
+        Integer, ForeignKey("matrix_plate.id"), index=True, nullable=False
+    )
     plate = relationship("MatrixPlate", backref="tubes")
     barcode = Column(String, unique=True, index=True, nullable=False)
     well_position = Column(String, nullable=False)

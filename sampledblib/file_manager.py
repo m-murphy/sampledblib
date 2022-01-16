@@ -27,7 +27,7 @@ class CaseInsensitiveDict(dict):
         )
 
 
-class CaseInsensitiveDictReader(csv.DictReader, object):
+class CaseInsensitiveDictReader(csv.DictReader):
     """
     DictReader that uses case insensitive dict, removes periods, and converts fieldnames to snake_case
     """
@@ -36,12 +36,12 @@ class CaseInsensitiveDictReader(csv.DictReader, object):
     def fieldnames(self):
         return [
             field.strip().replace(" ", "_").replace(".", "").lower()
-            for field in super(CaseInsensitiveDictReader, self).fieldnames
+            for field in super().fieldnames
         ]
 
     def __next__(self):
         d_insensitive = CaseInsensitiveDict()
-        d_original = super(CaseInsensitiveDictReader, self).__next__()
+        d_original = super().__next__()
 
         for k, v in d_original.items():
             d_insensitive[k] = v
@@ -49,7 +49,7 @@ class CaseInsensitiveDictReader(csv.DictReader, object):
         return d_insensitive
 
 
-class BaseFileManager(object):
+class BaseFileManager:
     def __init__(self, date_format=None):
         self.date_format = date_format or "%d-%b-%Y"
 
@@ -95,7 +95,7 @@ class BaseFileManager(object):
                         )
                     except ValueError:
                         raise DateParseError(
-                            message="Date must be in format 'MMM-DD-YYYY'"
+                            message=f"Date must be in format {self.date_format}"
                         )
                 else:
                     specimen_entry["collection_date"] = None
@@ -108,7 +108,11 @@ class BaseFileManager(object):
     @staticmethod
     def parse_plate_update_file(f):
         matrix_tube_entries = []
-        plate_uid = os.path.splitext(f.filename)[0]
+        if hasattr(f, "filename"):
+            # coming from file like object in a web request
+            plate_uid = os.path.splitext(f.filename)[0]
+        else:
+            plate_uid = os.path.splitext(os.path.basename(f.name))[0]
         try:
             r = CaseInsensitiveDictReader(f)
             for entry in r:
@@ -202,32 +206,49 @@ class CLIFileManager(BaseFileManager):
     def __init__(self, **kwargs):
         super(CLIFileManager, self).__init__(**kwargs)
 
-    def parse_study_subject_file(self, filename):
-        filename = self.parse_file_name(filename)
-        study_subject_uids = []
-        with open(filename, "r") as f:
-            r = CaseInsensitiveDictReader(f)
-            for entry in r:
-                try:
-                    study_subject_uids.append(entry["uid"])
-                except (KeyError, csv.Error):
-                    raise ValueError("File Format Incorrect")
+    def parse_plate_update_files(self, filepaths):
+        if isinstance(filepaths, str):
+            filepaths = [filepaths]
 
+        results = []
+        for filepath in filepaths:
+            fname = self.parse_file_name(filepath)
+            with open(fname, "r") as f:
+                results += self.parse_plate_update_file(f)
+
+        return results
+
+    def parse_study_subject_file(self, filepath):
+        filepath = self.parse_file_name(filepath)
+        with open(filepath, "r") as f:
+            study_subject_uids = super().parse_study_subject_file(f)
         return study_subject_uids
 
-    def parse_subject_search_file(self, filename):
-        filename = self.parse_file_name(filename)
+    def parse_new_plate_file(self, filepath):
+        filepath = self.parse_file_name(filepath)
+        with open(filepath, "r") as f:
+            specimen_entries = super().parse_new_plate_file(f)
+        return specimen_entries
+
+    def parse_specimen_search_file(self, filepath):
+        filepath = self.parse_file_name(filepath)
+        with open(filepath, "r") as f:
+            specimen_entries = super().parse_specimen_search_file(f)
+        return specimen_entries
+
+    def parse_subject_search_file(self, filepath):
+        filepath = self.parse_file_name(filepath)
 
         subject_queries = []
-        with open(filename, "r") as f:
+        with open(filepath, "r") as f:
             r = CaseInsensitiveDictReader(f)
             for entry in r:
                 try:
                     e = dict()
                     e["uid"] = entry["uid"]
                     e["short_code"] = entry["study_short_code"]
-                    if "collection_date" in entry:
-                        e["collection_date"] = self.parse_date(entry["collection_date"])
+                    if "date" in entry:
+                        e["collection_date"] = self.parse_date(entry["date"])
                     else:
                         e["collection_date"] = None
                     subject_queries.append(e)
@@ -236,11 +257,25 @@ class CLIFileManager(BaseFileManager):
 
         return subject_queries
 
-    def parse_specimen_plate_file(self, filename):
-        filename = self.parse_file_name(filename)
+    def parse_barcode_search_file(self, filepath):
+        filepath = self.parse_file_name(filepath)
+        with open(filepath, "r") as f:
+            barcode_entries, fields, barcode_index = super().parse_barcode_search_file(
+                f
+            )
+        return barcode_entries, fields, barcode_index
+
+    def parse_barcode_file(self, filepath):
+        filepath = self.parse_file_name(filepath)
+        with open(filepath, "r") as f:
+            barcodes = super().parse_barcode_file(f)
+        return barcodes
+
+    def parse_specimen_plate_file(self, filepath):
+        filepath = self.parse_file_name(filepath)
 
         specimen_entries = []
-        with open(filename, "r") as f:
+        with open(filepath, "r") as f:
             r = CaseInsensitiveDictReader(f)
             for entry in r:
                 try:

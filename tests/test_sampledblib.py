@@ -183,7 +183,6 @@ class TestSampleDB(unittest.TestCase):
     def test_add_matrix_plate_with_specimens(self):
         specimen_type = self.db.register_new_specimen_type("DNA")
         study = self.db.create_study("test", "TEST", True, "Max", "No Description")
-        # study_subject = self.db.add_study_subject('1', study.short_code)
         today = date.today()
         location = self.db.register_new_location("-80 Freezer")
 
