@@ -54,7 +54,7 @@ class BaseFileManager:
         self.date_format = date_format or "%d-%b-%Y"
 
     def parse_date(self, date_string):
-        return datetime.datetime.strptime(date_string, self.date_format)
+        return datetime.datetime.strptime(date_string, self.date_format).date()
 
     @staticmethod
     def parse_file_name(filename):
